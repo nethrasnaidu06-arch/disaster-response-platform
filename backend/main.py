@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from algorithms.triage import Incident, TriageQueue
+from backend.routing_service import find_route
 
 app = FastAPI(title="Disaster Response Platform API")
 
@@ -18,6 +19,14 @@ class IncidentRequest(BaseModel):
     """
     location: str
     severity: int  # 1 (minor) to 5 (critical)
+
+class RouteRequest(BaseModel):
+    place_name: str       # e.g. "Kochi, Kerala, India"
+    start_lat: float
+    start_lon: float
+    end_lat: float
+    end_lon: float
+    algorithm: str = "astar"  # "astar" or "dijkstra"
 
 
 @app.get("/")
@@ -73,3 +82,19 @@ def get_next_incident():
 @app.get("/incidents/queue-size")
 def queue_size():
     return {"incidents_waiting": triage_queue.size()}
+
+@app.post("/route")
+def get_route(route_request: RouteRequest):
+    """
+    Computes the shortest route between two coordinates within a given
+    area, using either A* (default) or Dijkstra.
+    """
+    result = find_route(
+        place_name=route_request.place_name,
+        start_lat=route_request.start_lat,
+        start_lon=route_request.start_lon,
+        end_lat=route_request.end_lat,
+        end_lon=route_request.end_lon,
+        algorithm=route_request.algorithm,
+    )
+    return result
