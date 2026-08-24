@@ -9,6 +9,15 @@ from backend.hospitals_data import HOSPITALS
 
 app = FastAPI(title="Disaster Response Platform API")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # allows requests from any origin — fine for local dev
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # In-memory triage queue — resets every time the server restarts.
 # Later this would be backed by a real database.
 triage_queue = TriageQueue()

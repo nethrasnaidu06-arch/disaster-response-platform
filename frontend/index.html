@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DISPATCH // Response Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --bg:#0a0d0a;
+    --panel:#0d1210;
+    --line: rgba(255,176,0,.22);
+    --line-dim: rgba(255,176,0,.10);
+    --amber:#ffb000;
+    --amber-dim: rgba(255,176,0,.55);
+    --red:#ff3b30;
+    --green:#3ddc84;
+    --ink:#e8e6df;
+    --ink-dim:#7c8078;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Mono',monospace;
+    overflow:hidden;
+    font-size:13px;
+  }
+
+  /* scanline + noise texture over everything */
+  .scanlines{
+    position:fixed; inset:0; pointer-events:none; z-index:999;
+    background:repeating-linear-gradient(
+      to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,.14) 3px
+    );
+    mix-blend-mode:overlay;
+    opacity:.5;
+  }
+  .vignette{
+    position:fixed; inset:0; pointer-events:none; z-index:998;
+    background:radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+
+  .app{ display:grid; grid-template-columns:340px 1fr 320px; height:100vh; }
+
+  .hairline{ border-color:var(--line) !important; }
+  .panel-border{ border:1px solid var(--line); }
+
+  /* ============ HEADER STRIP (full width, top) ============ */
+  .header{
+    grid-column:1 / -1;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 18px; height:46px;
+    border-bottom:1px solid var(--line);
+    background:var(--panel);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand .glyph{
+    width:22px;height:22px; border:1.5px solid var(--amber); border-radius:3px;
+    display:flex;align-items:center;justify-content:center;
+    animation:blink 2.4s steps(1) infinite;
+  }
+  .brand .glyph::after{ content:'△'; font-size:11px; color:var(--amber); }
+  .brand b{ letter-spacing:2px; font-weight:600; font-size:12.5px; }
+  .brand span{ color:var(--ink-dim); font-size:11px; margin-left:8px; letter-spacing:1px; }
+
+  .header-right{ display:flex; align-items:center; gap:22px; font-size:11px; color:var(--ink-dim); }
+  .header-right .clock{ color:var(--amber); letter-spacing:1px; }
+  .conn{ display:flex; align-items:center; gap:6px; }
+  .conn .led{ width:7px;height:7px;border-radius:50%; background:var(--ink-dim); }
+  .conn .led.up{ background:var(--green); box-shadow:0 0 8px var(--green); animation:blink 1.6s steps(1) infinite; }
+  .conn .led.down{ background:var(--red); box-shadow:0 0 8px var(--red); }
+
+  /* ============ LEFT: INCIDENT INPUT ============ */
+  .left{
+    border-right:1px solid var(--line);
+    padding:16px;
+    overflow-y:auto;
+    display:flex; flex-direction:column; gap:16px;
+  }
+  .block{ border:1px solid var(--line); background:var(--panel); }
+  .block-head{
+    padding:8px 12px; border-bottom:1px solid var(--line-dim);
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:10.5px; letter-spacing:1.5px; color:var(--amber-dim);
+  }
+  .block-head .n{ color:var(--ink-dim); }
+  .block-body{ padding:14px; }
+
+  label{ display:block; font-size:10.5px; letter-spacing:1px; color:var(--ink-dim); margin:12px 0 6px; }
+  label:first-of-type{ margin-top:0; }
+  input, select{
+    width:100%; padding:9px 10px; border:1px solid var(--line);
+    background:#000; color:var(--amber); font-family:inherit; font-size:12.5px;
+    outline:none;
+  }
+  input:focus{ border-color:var(--amber); }
+  input::placeholder{ color:#4a4a3a; }
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+
+  .sev-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-top:6px; }
+  .sev-opt{
+    padding:9px 0; text-align:center; border:1px solid var(--line);
+    background:#000; color:var(--ink-dim); cursor:pointer; font-size:12px; font-weight:600;
+    transition:all .1s;
+  }
+  .sev-opt.on{ background:var(--amber); color:#000; border-color:var(--amber); }
+  .sev-opt.on[data-v="5"]{ background:var(--red); border-color:var(--red); color:#fff; }
+  .sev-opt.on[data-v="4"]{ background:#ff7a1a; border-color:#ff7a1a; color:#000; }
+
+  .btn{
+    width:100%; padding:11px; margin-top:16px; border:1px solid var(--amber);
+    background:transparent; color:var(--amber); font-family:inherit;
+    font-size:11.5px; letter-spacing:1.5px; cursor:pointer;
+    transition:background .12s, color .12s;
+  }
+  .btn:hover{ background:var(--amber); color:#000; }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .btn.solid{ background:var(--amber); color:#000; }
+  .btn.solid:hover{ background:#fff; border-color:#fff; }
+
+  .hint{ font-size:10.5px; color:var(--ink-dim); line-height:1.5; margin-top:2px; }
+
+  /* ============ CENTER: MAP ============ */
+  .center{ position:relative; }
+  #map{ position:absolute; inset:0; filter:grayscale(1) brightness(.9) contrast(1.05); }
+  .leaflet-container{ background:#0a0d0a; }
+
+  .map-frame{
+    position:absolute; inset:12px; pointer-events:none; z-index:400;
+    border:1px solid var(--line-dim);
+  }
+  .corner{ position:absolute; width:14px;height:14px; border-color:var(--amber); }
+  .corner.tl{ top:-1px;left:-1px; border-top:2px solid; border-left:2px solid; }
+  .corner.tr{ top:-1px;right:-1px; border-top:2px solid; border-right:2px solid; }
+  .corner.bl{ bottom:-1px;left:-1px; border-bottom:2px solid; border-left:2px solid; }
+  .corner.br{ bottom:-1px;right:-1px; border-bottom:2px solid; border-right:2px solid; }
+
+  .map-label{
+    position:absolute; top:22px; left:22px; z-index:500;
+    font-size:10.5px; letter-spacing:1.5px; color:var(--amber-dim);
+    background:rgba(10,13,10,.75); padding:6px 10px; border:1px solid var(--line);
+  }
+  .map-legend{
+    position:absolute; bottom:22px; left:22px; z-index:500;
+    display:flex; gap:16px; font-size:10px; color:var(--ink-dim);
+    background:rgba(10,13,10,.75); padding:8px 12px; border:1px solid var(--line);
+  }
+  .map-legend .i{ display:flex; align-items:center; gap:6px; }
+  .map-legend .sq{ width:7px;height:7px; }
+
+  /* radar sweep signature element */
+  .sweep-wrap{ position:absolute; bottom:22px; right:22px; z-index:500; width:78px;height:78px; }
+  .sweep-wrap svg{ width:100%; height:100%; }
+  .sweep-ring{ fill:none; stroke:var(--line); }
+  .sweep-arm{ transform-origin:39px 39px; animation:rotate 3.2s linear infinite; }
+
+  /* ============ RIGHT: QUEUE + DISPATCH ============ */
+  .right{
+    border-left:1px solid var(--line);
+    padding:16px;
+    overflow-y:auto;
+    display:flex; flex-direction:column; gap:16px;
+  }
+  .stat-strip{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat{ border:1px solid var(--line); padding:10px 12px; }
+  .stat .n{ font-size:22px; color:var(--amber); font-weight:600; }
+  .stat .l{ font-size:9.5px; color:var(--ink-dim); letter-spacing:1px; margin-top:2px; }
+
+  .qlist{ display:flex; flex-direction:column; }
+  .qrow{
+    display:flex; align-items:center; gap:10px; padding:9px 0;
+    border-bottom:1px solid var(--line-dim); font-size:11.5px;
+  }
+  .qrow:last-child{ border-bottom:none; }
+  .qsev{
+    width:20px;height:20px; display:flex;align-items:center;justify-content:center;
+    font-size:10.5px; font-weight:700; flex-shrink:0; border:1px solid;
+  }
+  .qmeta{ flex:1; min-width:0; }
+  .qmeta .loc{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .qmeta .score{ color:var(--ink-dim); font-size:9.5px; }
+  .empty-row{ color:var(--ink-dim); font-size:11px; padding:8px 0; text-align:center; letter-spacing:.5px; }
+
+  .readout{ font-size:11.5px; }
+  .readout .line{
+    display:flex; justify-content:space-between; padding:7px 0;
+    border-bottom:1px solid var(--line-dim);
+  }
+  .readout .line:last-child{ border-bottom:none; }
+  .readout .k{ color:var(--ink-dim); letter-spacing:.5px; }
+  .readout .v{ color:var(--amber); font-weight:600; }
+  .readout .v.crit{ color:var(--red); }
+  .readout .v.ok{ color:var(--green); }
+  .result{ display:none; }
+  .result.show{ display:block; }
+
+  .cursor-blink{ display:inline-block; width:7px; height:12px; background:var(--amber); animation:blink 1s steps(1) infinite; vertical-align:middle; margin-left:2px; }
+
+  @keyframes blink{ 50%{ opacity:0; } }
+  @keyframes rotate{ from{ transform:rotate(0deg);} to{ transform:rotate(360deg);} }
+
+  ::-webkit-scrollbar{ width:6px; }
+  ::-webkit-scrollbar-thumb{ background:var(--line); }
+  ::-webkit-scrollbar-track{ background:transparent; }
+
+  @media (max-width:920px){
+    .app{ grid-template-columns:1fr; grid-template-rows:46px auto 40vh auto; }
+    .left, .right{ border:none; border-top:1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<div class="app">
+
+  <div class="header">
+    <div class="brand">
+      <div class="glyph"></div>
+      <b>DISPATCH</b>
+      <span>// DISASTER RESPONSE TERMINAL</span>
+    </div>
+    <div class="header-right">
+      <div class="conn"><span class="led down" id="led"></span><span id="connText">LINK: CHECKING</span></div>
+      <div class="clock" id="clock">00:00:00</div>
+    </div>
+  </div>
+
+  <!-- LEFT -->
+  <div class="left">
+    <div class="block">
+      <div class="block-head"><span>INCIDENT INPUT</span><span class="n">01</span></div>
+      <div class="block-body">
+        <label>DESCRIPTION</label>
+        <input id="loc" type="text" value="Kochi Ward 3" placeholder="location description">
+
+        <div class="row2">
+          <div>
+            <label>LAT</label>
+            <input id="lat" type="number" step="0.0001" value="9.9500">
+          </div>
+          <div>
+            <label>LON</label>
+            <input id="lon" type="number" step="0.0001" value="76.3100">
+          </div>
+        </div>
+        <div class="hint">click map to set coordinates</div>
+
+        <label>SEVERITY LEVEL</label>
+        <div class="sev-grid" id="sevRow">
+          <div class="sev-opt" data-v="1">1</div>
+          <div class="sev-opt" data-v="2">2</div>
+          <div class="sev-opt" data-v="3">3</div>
+          <div class="sev-opt on" data-v="4">4</div>
+          <div class="sev-opt" data-v="5">5</div>
+        </div>
+
+        <button class="btn solid" id="reportBtn">▶ SUBMIT INCIDENT</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head"><span>SYSTEM STATUS</span><span class="n">02</span></div>
+      <div class="block-body readout">
+        <div class="line"><span class="k">ROUTING ENGINE</span><span class="v ok">A*/DIJKSTRA</span></div>
+        <div class="line"><span class="k">ALLOCATION</span><span class="v ok">HUNGARIAN</span></div>
+        <div class="line"><span class="k">TRIAGE</span><span class="v ok">PRIORITY-HEAP</span></div>
+        <div class="line"><span class="k">REGION</span><span class="v">KOCHI, KL</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center">
+    <div id="map"></div>
+    <div class="map-frame">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+    </div>
+    <div class="map-label">GRID // KOCHI SECTOR — LIVE</div>
+
+    <div class="map-legend">
+      <div class="i"><span class="sq" style="background:var(--red)"></span>INCIDENT</div>
+      <div class="i"><span class="sq" style="background:var(--amber)"></span>HOSPITAL</div>
+      <div class="i"><span class="sq" style="background:var(--green)"></span>ROUTE</div>
+    </div>
+
+    <div class="sweep-wrap">
+      <svg viewBox="0 0 78 78">
+        <circle class="sweep-ring" cx="39" cy="39" r="36" stroke-width="1"/>
+        <circle class="sweep-ring" cx="39" cy="39" r="24" stroke-width="1"/>
+        <circle class="sweep-ring" cx="39" cy="39" r="12" stroke-width="1"/>
+        <g class="sweep-arm">
+          <line x1="39" y1="39" x2="39" y2="3" stroke="var(--amber)" stroke-width="1.2" opacity=".9"/>
+          <path d="M39,39 L39,3 A36,36 0 0,1 68,20 Z" fill="var(--amber)" opacity=".08"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="right">
+    <div class="stat-strip">
+      <div class="stat"><div class="n" id="queueCount">0</div><div class="l">IN QUEUE</div></div>
+      <div class="stat"><div class="n" id="dispatchCount">0</div><div class="l">DISPATCHED</div></div>
+    </div>
+
+    <div class="block">
+      <div class="block-head"><span>TRIAGE QUEUE</span><span class="n">03</span></div>
+      <div class="block-body">
+        <div class="qlist" id="queueList"><div class="empty-row">— NO ACTIVE INCIDENTS —</div></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="block-head"><span>DISPATCH</span><span class="n">04</span></div>
+      <div class="block-body">
+        <div class="hint" style="margin-bottom:10px;">route highest-priority incident to nearest hospital</div>
+        <button class="btn" id="dispatchBtn">▶ DISPATCH NEXT</button>
+
+        <div class="result readout" id="result" style="margin-top:14px;">
+          <div class="line"><span class="k">INCIDENT</span><span class="v" id="rLoc">—</span></div>
+          <div class="line"><span class="k">SEVERITY</span><span class="v" id="rSev">—</span></div>
+          <div class="line"><span class="k">PRIORITY</span><span class="v" id="rScore">—</span></div>
+          <div class="line"><span class="k">HOSPITAL</span><span class="v ok" id="rHosp">—</span></div>
+          <div class="line"><span class="k">DISTANCE</span><span class="v" id="rDist">—</span></div>
+          <div class="line"><span class="k">ALGORITHM</span><span class="v" id="rAlgo">—</span></div>
+          <div class="line"><span class="k">NODES EXP.</span><span class="v" id="rNodes">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = "http://127.0.0.1:8000";
+const PLACE = "Kochi, Kerala, India";
+
+const HOSPITALS = [
+  { name: "Kochi General Hospital", lat: 9.9700, lon: 76.2900 },
+  { name: "Ernakulam Medical Center", lat: 9.9950, lon: 76.3400 },
+  { name: "Kerala Care Hospital", lat: 9.9312, lon: 76.2673 },
+];
+
+// ---------- clock ----------
+function tickClock(){
+  const d = new Date();
+  document.getElementById('clock').textContent = d.toTimeString().slice(0,8);
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ---------- map ----------
+const map = L.map('map', { zoomControl:false }).setView([9.965, 76.30], 13);
+L.control.zoom({ position:'bottomright' }).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
+}).addTo(map);
+
+let incidentMarker = null, routeLine = null, dispatchedCount = 0;
+
+const dotIcon = (color, size=12) => L.divIcon({
+  className:'',
+  html:`<div style="width:${size}px;height:${size}px;background:${color};border:1px solid #000;box-shadow:0 0 8px ${color}"></div>`,
+  iconSize:[size,size], iconAnchor:[size/2,size/2]
+});
+
+HOSPITALS.forEach(h => {
+  L.marker([h.lat, h.lon], { icon: dotIcon('#ffb000') }).addTo(map).bindPopup(`<b>${h.name}</b>`);
+});
+
+function placeIncidentMarker(lat, lon){
+  if (incidentMarker) map.removeLayer(incidentMarker);
+  incidentMarker = L.marker([lat, lon], { icon: dotIcon('#ff3b30') }).addTo(map);
+  map.panTo([lat, lon]);
+}
+map.on('click', e => {
+  document.getElementById('lat').value = e.latlng.lat.toFixed(4);
+  document.getElementById('lon').value = e.latlng.lng.toFixed(4);
+  placeIncidentMarker(e.latlng.lat, e.latlng.lng);
+});
+placeIncidentMarker(9.9500, 76.3100);
+
+// ---------- severity ----------
+let severity = 4;
+document.querySelectorAll('.sev-opt').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.sev-opt').forEach(o => o.classList.remove('on'));
+    el.classList.add('on');
+    severity = parseInt(el.dataset.v);
+  });
+});
+
+// ---------- connection ----------
+async function checkConnection(){
+  const led = document.getElementById('led');
+  const txt = document.getElementById('connText');
+  try{
+    const res = await fetch(`${API}/health`);
+    if(res.ok){ led.className='led up'; txt.textContent='LINK: ESTABLISHED'; }
+    else throw 0;
+  }catch(e){ led.className='led down'; txt.textContent='LINK: OFFLINE'; }
+}
+checkConnection(); setInterval(checkConnection, 8000);
+
+// ---------- queue ----------
+let localQueue = [];
+function renderQueue(){
+  const list = document.getElementById('queueList');
+  document.getElementById('queueCount').textContent = localQueue.length;
+  if(localQueue.length === 0){ list.innerHTML = '<div class="empty-row">— NO ACTIVE INCIDENTS —</div>'; return; }
+  const sorted = [...localQueue].sort((a,b) => b.severity - a.severity);
+  list.innerHTML = sorted.map(inc => {
+    const crit = inc.severity >= 4;
+    return `<div class="qrow">
+      <div class="qsev" style="border-color:${crit?'var(--red)':'var(--amber)'};color:${crit?'var(--red)':'var(--amber)'}">${inc.severity}</div>
+      <div class="qmeta">
+        <div class="loc">${inc.location}</div>
+        <div class="score">PR ${Math.round(inc.priority_score)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- report ----------
+document.getElementById('reportBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('reportBtn');
+  const location = document.getElementById('loc').value || 'UNNAMED';
+  const lat = parseFloat(document.getElementById('lat').value);
+  const lon = parseFloat(document.getElementById('lon').value);
+  btn.disabled = true; btn.textContent = '▶ SUBMITTING...';
+  try{
+    const res = await fetch(`${API}/incidents`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ location, severity, lat, lon })
+    });
+    const data = await res.json();
+    localQueue.push({ location, severity, lat, lon, priority_score: data.priority_score, id: data.incident_id });
+    renderQueue();
+    placeIncidentMarker(lat, lon);
+  }catch(e){ alert('LINK ERROR — backend not reachable on port 8000'); }
+  finally{ btn.disabled = false; btn.textContent = '▶ SUBMIT INCIDENT'; }
+});
+
+// ---------- dispatch ----------
+document.getElementById('dispatchBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('dispatchBtn');
+  btn.disabled = true; btn.textContent = '▶ COMPUTING...';
+  try{
+    const res = await fetch(`${API}/dispatch?place_name=${encodeURIComponent(PLACE)}`, { method:'POST' });
+    const data = await res.json();
+    if(data.message === 'No incidents in queue'){ alert('QUEUE EMPTY — nothing to dispatch'); return; }
+
+    localQueue = localQueue.filter(i => i.id !== data.incident_id);
+    renderQueue();
+    dispatchedCount++;
+    document.getElementById('dispatchCount').textContent = dispatchedCount;
+
+    document.getElementById('rLoc').textContent = data.location;
+    document.getElementById('rSev').textContent = data.severity;
+    document.getElementById('rScore').textContent = data.priority_score;
+    document.getElementById('rHosp').textContent = data.assigned_hospital;
+    document.getElementById('rDist').textContent = `${(data.distance_meters/1000).toFixed(2)} KM`;
+    document.getElementById('rAlgo').textContent = data.route_details.algorithm.toUpperCase();
+    document.getElementById('rNodes').textContent = data.route_details.nodes_expanded;
+    document.getElementById('result').classList.add('show');
+
+    const hospital = HOSPITALS.find(h => h.name === data.assigned_hospital);
+    if(routeLine) map.removeLayer(routeLine);
+    if(hospital){
+      const from = [document.getElementById('lat').value, document.getElementById('lon').value];
+      routeLine = L.polyline([from, [hospital.lat, hospital.lon]], { color:'#3ddc84', weight:2.5, dashArray:'5,7' }).addTo(map);
+      map.fitBounds(routeLine.getBounds(), { padding:[90,90] });
+    }
+  }catch(e){ alert('DISPATCH FAILED — check backend connection'); }
+  finally{ btn.disabled = false; btn.textContent = '▶ DISPATCH NEXT'; }
+});
+</script>
+</body>
+</html>
