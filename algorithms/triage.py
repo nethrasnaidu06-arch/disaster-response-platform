@@ -12,6 +12,8 @@ class Incident:
     incident_id: int
     location: str
     severity: int  # 1-5
+    lat: float = 0.0
+    lon: float = 0.0
     reported_at: float = field(default_factory=time.time)
 
     def priority_score(self, urgency_weight=5):

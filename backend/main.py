@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from algorithms.triage import Incident, TriageQueue
 from backend.routing_service import find_route
 from backend.allocation_service import run_allocation
+from backend.hospitals_data import HOSPITALS
+
 
 
 app = FastAPI(title="Disaster Response Platform API")
@@ -21,6 +23,8 @@ class IncidentRequest(BaseModel):
     """
     location: str
     severity: int  # 1 (minor) to 5 (critical)
+    lat: float
+    lon: float
 
 class RouteRequest(BaseModel):
     place_name: str       # e.g. "Kochi, Kerala, India"
@@ -52,15 +56,14 @@ def health_check():
 
 @app.post("/incidents")
 def report_incident(incident_request: IncidentRequest):
-    """
-    Submit a new incident. It gets added to the triage priority queue.
-    """
     global incident_id_counter
 
     incident = Incident(
         incident_id=incident_id_counter,
         location=incident_request.location,
         severity=incident_request.severity,
+        lat=incident_request.lat,
+        lon=incident_request.lon,
     )
     triage_queue.add_incident(incident)
     incident_id_counter += 1
@@ -122,3 +125,47 @@ def allocate(allocation_request: AllocationRequest):
 
     assignments = run_allocation(victims, resources)
     return {"assignments": assignments}
+
+@app.post("/dispatch")
+def dispatch_next_incident(place_name: str = "Kochi, Kerala, India"):
+    """
+    Full workflow: pulls the most urgent incident from the triage queue,
+    finds the nearest hospital using real road routing, and returns the
+    combined result — this is the "brain" tying the algorithms together.
+    """
+    incident = triage_queue.get_next_incident()
+    if incident is None:
+        return {"message": "No incidents in queue"}
+
+    # For now, we don't have real incident coordinates, so we use a
+    # placeholder location near the center of the given area.
+    # (Later, incidents will carry their own lat/lon from the report.)
+    incident_location = [incident.lat, incident.lon]
+
+    best_hospital = None
+    best_distance = float("inf")
+    route_details = None
+
+    for hospital in HOSPITALS:
+        result = find_route(
+            place_name=place_name,
+            start_lat=incident_location[0],
+            start_lon=incident_location[1],
+            end_lat=hospital["location"][0],
+            end_lon=hospital["location"][1],
+            algorithm="astar",
+        )
+        if result["distance_meters"] < best_distance:
+            best_distance = result["distance_meters"]
+            best_hospital = hospital["name"]
+            route_details = result
+
+    return {
+        "incident_id": incident.incident_id,
+        "location": incident.location,
+        "severity": incident.severity,
+        "priority_score": round(incident.priority_score(), 2),
+        "assigned_hospital": best_hospital,
+        "distance_meters": best_distance,
+        "route_details": route_details,
+    }
