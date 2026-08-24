@@ -1,7 +1,7 @@
 import heapq
 import math
 import osmnx as ox
-from disaster_prone_locations import get_locations_for
+from algorithms.disaster_prone_locations import get_locations_for
 
 
 def haversine_distance(coord1, coord2):
