@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from algorithms.triage import Incident, TriageQueue
 from backend.routing_service import find_route
+from backend.allocation_service import run_allocation
+
 
 app = FastAPI(title="Disaster Response Platform API")
 
@@ -27,6 +29,15 @@ class RouteRequest(BaseModel):
     end_lat: float
     end_lon: float
     algorithm: str = "astar"  # "astar" or "dijkstra"
+
+class LocationEntry(BaseModel):
+    name: str
+    location: list[float]  # [latitude, longitude]
+
+
+class AllocationRequest(BaseModel):
+    victims: list[LocationEntry]
+    resources: list[LocationEntry]
 
 
 @app.get("/")
@@ -98,3 +109,16 @@ def get_route(route_request: RouteRequest):
         algorithm=route_request.algorithm,
     )
     return result
+@app.post("/allocate")
+def allocate(allocation_request: AllocationRequest):
+    """
+    Given a list of victims and available resources (hospitals/shelters),
+    returns the optimal victim-to-resource assignment using the
+    Hungarian algorithm — minimizing total travel distance across
+    everyone, not just each victim's individual nearest choice.
+    """
+    victims = [v.model_dump() for v in allocation_request.victims]
+    resources = [r.model_dump() for r in allocation_request.resources]
+
+    assignments = run_allocation(victims, resources)
+    return {"assignments": assignments}
